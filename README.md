@@ -1,0 +1,1 @@
+# fuc_stydy
