@@ -1,17 +1,19 @@
 package com.foxrain.sheep.whileblack.util;
 
 import com.google.common.collect.Queues;
+import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.tuple.Triple;
 import reactor.core.publisher.ConnectableFlux;
 import reactor.core.publisher.Flux;
 
 import java.lang.reflect.InvocationTargetException;
+import java.util.NoSuchElementException;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
 /**
@@ -22,16 +24,41 @@ import java.util.function.Function;
  *
  * @author foxrain
  */
+@Slf4j
 public class YieldGenerator<MT extends Flux<T>, T, R>
 {
-    private boolean done = false;
+    private class Condition {
+        private boolean isSet;
+        public synchronized void set() {
+            isSet = true;
+            notify();
+        }
+        public synchronized void await() {
+            try {
+                if (isSet)
+                    return;
+                wait();
+            }
+            catch (InterruptedException e)
+            {
+                Thread.currentThread().interrupt();
+            }
+            finally {
+                isSet = false;
+            }
+        }
+    }
+
+    private boolean hasFinished = false;
+    private final Condition itemAvailableOrHasFinished = new Condition();
+    private final Condition isNextItemReady = new Condition();
+    private boolean nextItemAvailable;
+    private Exception exceptionRaisedByProducer;
+
     private Function<YieldGenerator<MT, T, R>, R> function;
-    private ConcurrentLinkedQueue<Testers.Value<T>> yieldValue = Queues.newConcurrentLinkedQueue();
+    private T yieldValue = null;
     private int callCount = 0;
     private MT returnValue;
-    public final Function<T, MT> doRec;
-    private final Object lock = new Object();
-    private final AtomicBoolean atomicBoolean = new AtomicBoolean(false);
     private R finalResult;
 
     public R getResult()
@@ -43,12 +70,12 @@ public class YieldGenerator<MT extends Flux<T>, T, R>
     {
         final YieldGenerator<Flux<Integer>, Integer, Flux<Triple<Integer, Integer, Integer>>> gn = YieldGenerator.of((m) ->
         {
-            Testers.Value<Integer> c = m.yield(Flux.just(5));
-            Testers.Value<Integer> a = m.yield(Flux.just(3));
-            Testers.Value<Integer> b = m.yield(Flux.just(40)); // yield * 고려..
+            Integer c = m.yield(Flux.just(5));
+            Integer a = m.yield(Flux.just(3));
+            Integer b = m.yield(Flux.just(4)); // yield * 고려..
 
-            return m.returns(a.v() * a.v() + b.v() * b.v() == c.v() * c.v() ?
-                Flux.just(new Triple[]{Triple.of(a.v(), b.v(), c.v())}) :
+            return m.returns(a * a + b * b == c * c ?
+                Flux.just(new Triple[]{Triple.of(a, b, c)}) :
                 Flux.just(Triple.emptyArray()));
         });
 
@@ -66,46 +93,34 @@ public class YieldGenerator<MT extends Flux<T>, T, R>
 
     public MT doREC(T v)
     {
-        Testers.Return<MT> mtReturn = YieldGenerator.this.next(v);
-        if (mtReturn.isDone())
-        {
-            return mtReturn.getValue();
-        }
-        else
+        Return<MT> mtReturn = YieldGenerator.this.next(v);
+        if (!mtReturn.isDone())
         {
             final MT mt = (MT) mtReturn.getValue().flatMap(v1 -> doREC(v1));
             final ConnectableFlux<T> publish = mt.publish();
             publish.subscribe();
             publish.connect();
-            return mtReturn.getValue();
         }
+        return mtReturn.getValue();
     }
 
     public YieldGenerator(Function<YieldGenerator<MT, T, R>, R> supplier)
     {
         this.function = supplier;
 
-        this.doRec = new Function<T, MT>()
-        {
-            @Override
-            public MT apply(T v)
-            {
-                Testers.Return<MT> mtReturn = YieldGenerator.this.next(v);
-                return mtReturn.isDone() ?
-                        mtReturn.getValue()
-                    :
-//                        YieldGenerator.this.resolveFlatMap(mtReturn.getValue(), YieldGenerator.this.doRec); //TODO
-                    (MT) mtReturn.getValue().flatMap(v1 -> doRec.apply(v1));
-            }
-        };
-
         final ExecutorService executorService = Executors.newSingleThreadExecutor();
         final Future<?> submit = executorService.submit(() ->
         {
-            System.out.println("STARTED");
-            finalResult = this.function.apply(this);
+            try
+            {
+                log.info("STARTED");
+                finalResult = this.function.apply(this);
+            } catch (Exception e)
+            {
+                exceptionRaisedByProducer = e;
+                log.error("There was an error ", e);
+            }
         });
-//        final MT apply = this.doRec.apply(null);
         final MT mt = doREC(null);
         try
         {
@@ -162,81 +177,54 @@ public class YieldGenerator<MT extends Flux<T>, T, R>
 
     public void setDoneTrue()
     {
-        done = true;
+        hasFinished = true;
     }
 
-    public Testers.Return<MT> next(T t)
-    {
-        System.out.println("Next" + callCount);
-        synchronized (lock)
-        {
-            if (callCount < 2)
-                yieldValue.clear();
-            yieldValue.add(new Testers.Value(t));
-            callCount++;
-            lock.notifyAll();
-            while (atomicBoolean.get() == false)
-            {
-                waits();
-            }
-            atomicBoolean.set(false);
-            return new Testers.Return(returnValue, done);
-        }
+    private boolean waitForNext() {
+        if (nextItemAvailable)
+            return true;
+        if (exceptionRaisedByProducer != null)
+            throw new RuntimeException(exceptionRaisedByProducer);
+        if (callCount > 0)
+            isNextItemReady.set();
+        itemAvailableOrHasFinished.await();
+        return true;
     }
 
-    public Testers.Value<T> yield(MT expression)
+    public Return<MT> next(T t)
     {
-        /////doRec.apply(expression);
-        System.out.println("Yield" + callCount);
-        synchronized (lock)
+        yieldValue = t;
+        if (!waitForNext())
         {
-            returnValue = expression;
-            while (atomicBoolean.get() == true)
-            {
-                waits();
-            }
-            atomicBoolean.set(true);
-            lock.notifyAll();
-            while (callCount < 2 || yieldValue.isEmpty())
-            {
-                waits();
-            }
-            //atomicBoolean.set(true);
-            return yieldValue.poll();
+            throw new NoSuchElementException("No more item");
         }
+        nextItemAvailable = false;
+        callCount++;
+        return new Return(returnValue, hasFinished);
+    }
+
+    public T yield(MT expression)
+    {
+        returnValue = expression;
+        nextItemAvailable = true;
+
+        itemAvailableOrHasFinished.set();
+        isNextItemReady.await();
+        return yieldValue;
     }
 
     public R returns(R expression)
     {
-        System.out.println("Return"+callCount);
-        synchronized (lock)
-        {
-            setDoneTrue();
-            //returnValue = null;
-            atomicBoolean.set(true);
-            lock.notifyAll();
-            return expression;
-        }
-    }
-
-    private void waits()
-    {
-        try
-        {
-            lock.wait();
-        }
-        catch (InterruptedException e)
-        {
-            e.printStackTrace();
-        }
+        nextItemAvailable = true;
+        setDoneTrue();
+        itemAvailableOrHasFinished.set();
+        return expression;
     }
 
     public static void main(String[] args)
     {
         try
         {
-
-
             final ConcurrentLinkedQueue<Integer> empty = Queues.newConcurrentLinkedQueue();
             empty.add(3);
             empty.add(34);
@@ -255,6 +243,18 @@ public class YieldGenerator<MT extends Flux<T>, T, R>
         } catch (Exception e)
         {
             e.printStackTrace();
+        }
+    }
+
+    @Getter
+    public static class Return<T>
+    {
+        private final T value;
+        private final boolean done;
+        public Return(T value, boolean done)
+        {
+            this.value = value;
+            this.done = done;
         }
     }
 }
