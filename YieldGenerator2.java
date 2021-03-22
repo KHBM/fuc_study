@@ -17,7 +17,9 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * Created with intellij IDEA.
@@ -82,11 +84,20 @@ public class YieldGenerator<RR>
                 Flux.just(Triple.emptyArray()));
         });
 
-        ((Flux<Triple<Integer,Integer,Integer>>)gn.getResult())
-            .subscribe(t -> {
+//        ((Flux<Triple<Integer,Integer,Integer>>)gn.getResult())
+//            .subscribe(t -> {
+//                System.out.println(String.format("T : [(%d, %d, %d)]"
+//                    , t.getLeft(), t.getMiddle(), t.getRight()));
+//            });
+        gn.resolveSubscribe(gn.getResult(), new Consumer<Triple<Integer,Integer,Integer>>()
+        {
+            @Override
+            public void accept(Triple<Integer,Integer,Integer> t)
+            {
                 System.out.println(String.format("T : [(%d, %d, %d)]"
                     , t.getLeft(), t.getMiddle(), t.getRight()));
-            });
+            }
+        });
     }
 
 //    public static YieldGenerator of(Function<YieldGenerator<RR>, RR> supplier)
@@ -103,11 +114,13 @@ public class YieldGenerator<RR>
         log.info("DoREC get value : {}", typeToken.getType());
         if (!mtReturn.isDone())
         {
-            final MT mt = (MT) ((Flux)mtReturn.getValue()).flatMap(v1 -> doREC(v1));
-//            final MT mt = (MT) resolveFlatMap(mtReturn.getValue(), v1 -> doREC(v1));
-            final ConnectableFlux<T> publish = ((Flux)mt).publish();
-            publish.subscribe();
-            publish.connect();
+//            final MT mt = (MT) ((Flux)mtReturn.getValue()).flatMap(v1 -> doREC(v1));
+            final MT mt = (MT) resolveFlatMap(mtReturn.getValue(), v1 -> doREC(v1));
+//            final ConnectableFlux<T> publish = ((Flux)mt).publish();
+            final Object subscribe = resolveMethodWithNoParam(mt, "publish");
+//            publish.subscribe();
+            resolveMethodWithNoParam(subscribe, "connect");
+//            publish.connect();
         }
         return mtReturn.getValue();
     }
@@ -168,6 +181,87 @@ public class YieldGenerator<RR>
         try
         {
             return (MT) flatMap.invoke(target, new Function[]{func});
+        }
+        catch (IllegalAccessException e)
+        {
+            e.printStackTrace();
+            throw new RuntimeException(e);
+        }
+        catch (InvocationTargetException e)
+        {
+            e.printStackTrace();
+            throw new RuntimeException(e);
+        }
+    }
+
+    private <MT, MR> MR resolveMethodWithNoParam(MT target, String parameterName)
+    {
+        final java.lang.reflect.Method flatMap = findMethodWithoutNoParameter(target, parameterName);
+        try
+        {
+            return (MR) flatMap.invoke(target, null);
+        }
+        catch (IllegalAccessException e)
+        {
+            e.printStackTrace();
+            throw new RuntimeException(e);
+        }
+        catch (InvocationTargetException e)
+        {
+            e.printStackTrace();
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static <T> java.lang.reflect.Method findMethodWithoutNoParameter(T target, String methodName)
+    {
+        Class<?> tclass = target.getClass();
+
+        java.lang.reflect.Method[] mList = tclass.getMethods();
+        for (java.lang.reflect.Method m : mList)
+        {
+            if (m.getName().equalsIgnoreCase(methodName))
+            {
+                Class<?>[] paramsTypes = m.getParameterTypes();
+                if (paramsTypes.length == 0)
+                {
+                    return m;
+                }
+            }
+        }
+
+        throw new RuntimeException("No "+methodName+"() method");
+    }
+
+    public static <T> java.lang.reflect.Method findSubscribe(T t)
+    {
+        Class<?> tclass = t.getClass();
+
+        java.lang.reflect.Method[] mList = tclass.getMethods();
+        for (java.lang.reflect.Method m : mList)
+        {
+            if (m.getName().equalsIgnoreCase("subscribe"))
+            {
+                Class<?>[] paramsTypes = m.getParameterTypes();
+                if (paramsTypes.length == 1)
+                {
+                    if (paramsTypes[0].getName().equals("java.util.function.Consumer"))
+                    {
+                        return m;
+                    }
+                }
+            }
+        }
+
+        throw new RuntimeException("No flatmap(Function) method");
+    }
+
+    private <MT, T> MT resolveSubscribe(MT target, Consumer<T> consum)
+    {
+        final java.lang.reflect.Method subsc = findSubscribe(target);
+        try
+        {
+            return (MT) subsc.invoke(target, new Consumer[]{consum});
         }
         catch (IllegalAccessException e)
         {
