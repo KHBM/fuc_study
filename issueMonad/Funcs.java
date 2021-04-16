@@ -3,14 +3,10 @@ package schedule;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import lombok.extern.log4j.Log4j2;
-import org.reactivestreams.Publisher;
-import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.function.Function;
-import java.util.stream.Stream;
 
 /**
  * Created with intellij IDEA.
@@ -37,29 +33,8 @@ public class Funcs
             final R result = f.apply(value);
             return new Identity<>(result);
         }
-//? extends Publisher<? extends R>
         public <R> Identity<R> flatMap(Function<? super T, Identity<R>> f)
         {
-//            Optional.of(1)
-//            .flatMap(new Function<Integer, Optional<Object>>()
-//            {
-//                @Override
-//                public Optional<Object> apply(Integer s)
-//                {
-//                    return Stream.of(s);
-//                }
-//            });
-//
-//            Flux.just(1)
-//                .flatMap(new Function<Integer, Publisher<?>>()
-//                {
-//                    @Override
-//                    public Publisher<?> apply(Integer s)
-//                    {
-//                        return Stream.of(s);
-//                    }
-//                });
-//
             return f.apply(value);
         }
 
@@ -74,7 +49,7 @@ public class Funcs
             this.list = ImmutableList.copyOf(value);
         }
 
-        public <R> FList<?> map(Function<? super T, R> f)
+        public <R> FList<R> map(Function<? super T, R> f)
         {
             ArrayList<R> result = new ArrayList<>(list.size());
 
@@ -86,7 +61,7 @@ public class Funcs
             return new FList<>(result);
         }
 
-        public <U> FList<U> flatMap(Function<? super T, FList<? extends U>> f)
+        public <U> FList<U> flatMap(Function<? super T, FList<U>> f)
         {
             // [1, 2, 3] with x -> [x*x] => [1, 4, 9]
             final FList map = this.map(f);
@@ -98,10 +73,10 @@ public class Funcs
             return this.list;
         }
 
-        public static FList<?> concat(FList<FList<?>> lists)
+        public <U> FList<U> concat(FList<FList<U>> lists)
         {
-            List<?> result = Lists.newArrayList();
-            for (FList list : lists.getData())
+            List<U> result = Lists.newArrayList();
+            for (FList<U> list : lists.getData())
             {
                 result.addAll(list.getData());
             }
@@ -113,25 +88,15 @@ public class Funcs
     {
         try
         {
-//        test1ExpandIntegers();
-
             final ArrayList<Integer> integers = Lists.newArrayList(1, 3, 5, 6, 7);
+//            final ArrayList<Integer> integers = Lists.newArrayList();
             FList<Integer> fList = new FList<>(integers);
             final FList<String> data1 =
-                fList.flatMap(t -> new FList<>(Lists.newArrayList(String.valueOf(t))))
+                fList.flatMap(t -> new FList<>(Lists.newArrayList(String.valueOf(t), String.valueOf(t-1))))
 //            fList.flatMap(t -> new FList<>(Lists.newArrayList(String.valueOf(t))).flatMap(tv -> new FList<>(Lists.newArrayList(tv + t))))
                 .flatMap(s ->
-                {
-                    System.out.println("what s : " + s);
-                    return new FList<>(Lists.newArrayList(s + "_hello"));
-                });
+                    new FList<>(Lists.newArrayList(s + "_hello")));
             final List<String> data = data1.getData();
-            System.out.printf("[");
-            for (String d : data)
-            {
-                System.out.print(d + ", ");
-            }
-            System.out.println("]");
             log.info(data);
         } catch (Exception e)
         {
@@ -145,12 +110,6 @@ public class Funcs
         FList<Integer> fList = new FList<>(integers);
         final FList<Integer> fList1 = fList.flatMap((t) -> new FList<>(Lists.newArrayList(t, t)));
         final List<Integer> data = fList1.getData();
-        System.out.printf("[");
-        for (Integer d : data)
-        {
-            System.out.print(d +", ");
-        }
-        System.out.println("]");
         log.info(data);
     }
 
@@ -163,7 +122,7 @@ public class Funcs
             this.valueOrNull = valueOrNull;
         }
 
-        public <R> FOptional<R> map(Function<? super T,R> f)
+        public <R> FOptional<R> map(Function<? super T, R> f)
         {
             if (valueOrNull == null)
                 return empty();
@@ -181,9 +140,12 @@ public class Funcs
             return new FOptional<T>(null);
         }
 
-        public <U> FOptional<U> flatMap(Function<? super T, FOptional<? extends U>> f)
+        public <U> FOptional<U> flatMap(Function<? super T, FOptional<U>> f)
         {
-            return null;
+            if (valueOrNull == null)
+                return empty();
+            else
+                return f.apply(valueOrNull);
         }
     }
 
