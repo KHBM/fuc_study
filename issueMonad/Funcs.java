@@ -5,6 +5,7 @@ import com.google.common.collect.Lists;
 import lombok.extern.log4j.Log4j2;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.function.Function;
 
@@ -51,7 +52,7 @@ public class Funcs
 
         public <R> FList<R> map(Function<? super T, R> f)
         {
-            ArrayList<R> result = new ArrayList<>(list.size());
+            List<R> result = new ArrayList<>(list.size());
 
             for (T t : list)
             {
@@ -64,8 +65,8 @@ public class Funcs
         public <U> FList<U> flatMap(Function<? super T, FList<U>> f)
         {
             // [1, 2, 3] with x -> [x*x] => [1, 4, 9]
-            final FList map = this.map(f);
-            return concat(map);
+            final FList<FList<U>> map = this.map(f);
+            return FList.concat(map);
         }
 
         public List<T> getData()
@@ -73,7 +74,7 @@ public class Funcs
             return this.list;
         }
 
-        public <U> FList<U> concat(FList<FList<U>> lists)
+        public static <U> FList<U> concat(FList<FList<U>> lists)
         {
             List<U> result = Lists.newArrayList();
             for (FList<U> list : lists.getData())
@@ -88,14 +89,14 @@ public class Funcs
     {
         try
         {
-            final ArrayList<Integer> integers = Lists.newArrayList(1, 3, 5, 6, 7);
-//            final ArrayList<Integer> integers = Lists.newArrayList();
+            final List<Integer> integers = Arrays.asList(1, 3, 5, 6, 7);
+//            final List<Integer> integers = Arrays.asList();
             FList<Integer> fList = new FList<>(integers);
             final FList<String> data1 =
-                fList.flatMap(t -> new FList<>(Lists.newArrayList(String.valueOf(t), String.valueOf(t-1))))
-//            fList.flatMap(t -> new FList<>(Lists.newArrayList(String.valueOf(t))).flatMap(tv -> new FList<>(Lists.newArrayList(tv + t))))
+                fList.flatMap(t -> new FList<>(Arrays.asList(String.valueOf(t), String.valueOf(t-1))))
+//            fList.flatMap(t -> new FList<>(Arrays.asList(String.valueOf(t))).flatMap(tv -> new FList<>(Arrays.asList(tv + t))))
                 .flatMap(s ->
-                    new FList<>(Lists.newArrayList(s + "_hello")));
+                    new FList<>(Arrays.asList(s + "_hello")));
             final List<String> data = data1.getData();
             log.info(data);
         } catch (Exception e)
@@ -106,9 +107,9 @@ public class Funcs
 
     private static void test1ExpandIntegers()
     {
-        final ArrayList<Integer> integers = Lists.newArrayList(1, 3, 5, 6, 7);
+        final List<Integer> integers = Arrays.asList(1, 3, 5, 6, 7);
         FList<Integer> fList = new FList<>(integers);
-        final FList<Integer> fList1 = fList.flatMap((t) -> new FList<>(Lists.newArrayList(t, t)));
+        final FList<Integer> fList1 = fList.flatMap((t) -> new FList<>(Arrays.asList(t, t)));
         final List<Integer> data = fList1.getData();
         log.info(data);
     }
