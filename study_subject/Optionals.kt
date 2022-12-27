@@ -13,21 +13,27 @@ package com.foxrain.sheep.whileblack.util.study_subject
  * 사용하기 위한 것입니다. 유형이 선택적인 변수는 그 자체가 널이 아니어야 합니다. 항상 Optional 인스턴스를 가리켜야
  * 합니다. 부터: 1.8
  */
-class Optionals<T>(
-    var value: T
-) {
-
-
+class Optionals<T>
+// private 생성자 관련해서는 이런 방식으로 작성한다.
+private constructor(private var value: T) {
     companion object {
-        val empty = Optionals(null)
+        private val EMPTY = Optionals(null)
 
         /**
          * Generic 함수 정의 Generic 함수를 정의할 때, 타입이 정해지지 않은 변수는 함수 이름 앞에 <T>처럼 정의되어야
          * 합니다. 아래 코드는 타입 T 변수 num1과 num2를 더하고 타입 T 변수를 리턴하는 함수입니다.
          */
         fun <K> of(t: K) = Optionals(t)
-        fun <K> ofNullable(t: K) = t?.let { Optionals(t) } ?: empty
+
+        fun <T> ofNullable(t: T): Optionals<out T?> {
+            return if (t != null) {
+                Optionals(t)
+            } else {
+                EMPTY
+            }
+        }
     }
+
 
     fun isPresent() = value != null
 
@@ -52,12 +58,12 @@ class Optionals<T>(
         }
     }
 
-    fun <T> filter(predicate: (T) -> Boolean): Optionals<T>? {
-        if (isPresent()) {
-            return this
+
+    fun filter(predicate: (T) -> Boolean): Optionals<T>? {
+        return if (predicate(value)) {
+            Optionals(value)
         } else {
-            val result = predicate(value)
-            return result ? this: empty
+            null
         }
     }
 
