@@ -58,7 +58,6 @@ private constructor(private var value: T) {
         }
     }
 
-
     fun filter(predicate: (T) -> Boolean): Optionals<T>? {
         return if (predicate(value)) {
             Optionals(value)
@@ -67,12 +66,41 @@ private constructor(private var value: T) {
         }
     }
 
-//    fun map(action:(T) -> Any): Any
+    fun <U> map(mapper:(T) -> U): Optionals<out U?> {
+        return if (!isPresent()) {
+            return EMPTY
+        } else {
+            ofNullable(mapper(value))
+        }
+    }
 
-//    fun <U> map(mapper: Function<in T?, out U>): Optional<U>? {
-//        Objects.requireNonNull(mapper)
-//        return if (!isPresent()) empty() else {
-//            Optional.ofNullable(mapper.apply(value))
-//        }
-//    }
+    fun <U> flatMap(mapper:(T) -> Optionals<U>): Optionals<out U?> {
+        return if (!isPresent()) {
+            EMPTY
+        } else {
+            mapper(value)
+        }
+    }
+
+    fun orElse(other:T): T {
+        return if(value != null) {
+            return value
+        } else {
+            return other
+        }
+    }
+
+    fun orElseGet(new:() -> T): T {
+        return if(value != null) {
+            return value
+        } else {
+            new()
+        }
+    }
+}
+
+fun main() {
+    val optionals = Optionals.of("a")
+    val get = optionals.filter { it.equals("a") }!!.get()
+    System.out.println(get)
 }
